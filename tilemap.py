@@ -32,9 +32,3 @@ class Room:
     rx = random.randint(self.x + 1, self.x2 - 2)
     ry = random.randint(self.y + 1, self.y2 - 2)
     return rx, ry
-
-
-
-
-
-
