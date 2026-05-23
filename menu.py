@@ -29,7 +29,43 @@ class Menu:
 
         self.hint_font = pygame.font.Font(None, 24)
 
-        # Загружаем видео (кадры будем масштабировать на лету, чтобы подходить под любой размер экрана)
+        # === Загрузка звуков ===
+        self.sound_button = None      # push_button.wav - эффект нажатия
+        self.music_loaded = False     # background_menu.wav - фоновая музыка
+
+        try:
+            # Инициализация микшера (если не был инициализирован глобально)
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+            
+            sounds_path = os.path.join("assets", "sounds", "menu")
+            
+            # 🔘 Звук кнопки (короткий эффект)
+            button_path = os.path.join(sounds_path, "push_button.wav")
+            if os.path.exists(button_path):
+                self.sound_button = pygame.mixer.Sound(button_path)
+                self.sound_button.set_volume(self.settings.master_volume * self.settings.music_volume)
+                print(f"✓ Загружен звук кнопки: {button_path}")
+            else:
+                print(f"⚠ Звук кнопки не найден: {button_path}")
+            
+            # 🎵 Фоновая музыка (зацикленная)
+            music_path = os.path.join(sounds_path, "background_menu.wav")
+            if os.path.exists(music_path):
+                pygame.mixer.music.load(music_path)
+                pygame.mixer.music.set_volume(self.settings.master_volume * self.settings.music_volume)
+                pygame.mixer.music.play(loops=-1)  # -1 = бесконечный цикл
+                self.music_loaded = True
+                print(f"✓ Запущена фоновая музыка: {music_path}")
+            else:
+                print(f"⚠ Фоновая музыка не найдена: {music_path}")
+                
+        except pygame.error as e:
+            print(f"❌ Ошибка SDL_mixer: {e}")
+        except Exception as e:
+            print(f"❌ Ошибка загрузки звуков: {type(e).__name__}: {e}")
+
+        # Загружаем видео (кадры будем масштабировать на лету)
         self.frames = []
         video_path = os.path.join("assets", "videos", "menu_bg.mp4")
         try:
@@ -41,7 +77,6 @@ class Menu:
                     if i >= 300:
                         break
                     frame_surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
-                    # Не масштабируем сразу, сохраняем оригинал
                     self.frames.append(frame_surface)
                 self.current_frame = 0
                 print(f"Загружено {len(self.frames)} кадров")
@@ -49,6 +84,22 @@ class Menu:
                 print(f"Видео не найдено: {video_path}")
         except Exception as e:
             print(f"Ошибка видео: {e}")
+
+    def _update_sound_volumes(self):
+        """Применяет текущие настройки громкости к звукам"""
+        vol = self.settings.master_volume * self.settings.music_volume
+        if self.sound_button:
+            self.sound_button.set_volume(vol)
+        if self.music_loaded:
+            pygame.mixer.music.set_volume(vol)
+
+    def _play_button_sound(self):
+        """Воспроизводит звук кнопки с проверкой"""
+        if self.sound_button:
+            try:
+                self.sound_button.play()
+            except pygame.error:
+                pass  # Игнорируем ошибки воспроизведения
 
     def draw_button(self, text, x, y, width, height, is_selected):
         if is_selected:
@@ -73,7 +124,7 @@ class Menu:
         screen_h = self.screen.get_height()
 
         while self.running:
-            # Отрисовка видеофона (масштабируем каждый кадр под текущий размер окна)
+            # Отрисовка видеофона
             if self.frames:
                 self.current_frame = (self.current_frame + 1) % len(self.frames)
                 frame = self.frames[self.current_frame]
@@ -109,7 +160,9 @@ class Menu:
                 y = start_y + i * (button_h + 15)
                 button_rect = pygame.Rect(start_x, y, button_w, button_h)
                 if button_rect.collidepoint(mouse_x, mouse_y):
-                    self.selected = i
+                    if self.selected != i:
+                        self.selected = i
+                        self._play_button_sound()  # Звук при наведении
 
             for i, item in enumerate(self.menu_items):
                 y = start_y + i * (button_h + 15)
@@ -124,6 +177,7 @@ class Menu:
                     elif event.key == pygame.K_DOWN:
                         self.selected = (self.selected + 1) % len(self.menu_items)
                     elif event.key == pygame.K_RETURN:
+                        self._play_button_sound()  # Звук при подтверждении
                         return self.get_action()
                     elif event.key == pygame.K_ESCAPE:
                         return "exit"
@@ -133,6 +187,7 @@ class Menu:
                             y = start_y + i * (button_h + 15)
                             button_rect = pygame.Rect(start_x, y, button_w, button_h)
                             if button_rect.collidepoint(event.pos):
+                                self._play_button_sound()  # Звук при клике
                                 return self.get_action(i)
 
             pygame.display.flip()
@@ -165,8 +220,6 @@ class SettingsMenu:
         self.clock = pygame.time.Clock()
         self.running = True
         self.selected_option = 0
-        
-        # Яркость (0 = чёрный, 100 = без изменений)
         self.brightness_overlay = None
 
         # Шрифты
@@ -220,13 +273,12 @@ class SettingsMenu:
         self._build_menu_items()
         self.dragging = False
         self.drag_index = None
+        self.toggle_rects = {}
 
     def _build_menu_items(self):
         res_options = self.settings.get_resolution_options()
         res_texts = [f"{w}x{h}" for w, h in res_options]
         current_res_index = self.settings.get_resolution_index()
-        
-        # Получаем яркость из настроек (если нет, по умолчанию 100)
         brightness = getattr(self.settings, 'brightness', 100)
 
         self.menu_items = [
@@ -239,6 +291,12 @@ class SettingsMenu:
             {"type": "button", "label": "Назад", "action": "back"}
         ]
 
+    def _update_sound_volumes(self):
+        """Применяет настройки громкости ко всем звукам"""
+        vol = self.settings.master_volume * self.settings.music_volume
+        if pygame.mixer.get_init():
+            pygame.mixer.music.set_volume(vol)
+
     def update_value(self, index, new_value):
         item = self.menu_items[index]
         if item["type"] == "slider":
@@ -250,27 +308,27 @@ class SettingsMenu:
                 self.update_brightness()
             elif item["label"] == "Общий звук":
                 self.settings.master_volume = new_value / 100.0
+                self._update_sound_volumes()
             elif item["label"] == "Музыка":
                 self.settings.music_volume = new_value / 100.0
+                self._update_sound_volumes()
         elif item["type"] == "choice":
             item["value_index"] = new_value
             self.settings.set_resolution_by_index(new_value)
             self.screen = self.settings.apply_resolution(self.screen)
-            self.update_brightness()  # Обновляем overlay под новый размер
+            self.update_brightness()
         elif item["type"] == "toggle":
             item["value"] = new_value
             self.settings.fullscreen = new_value
             self.screen = self.settings.apply_resolution(self.screen)
-            self.update_brightness()  # Обновляем overlay под новый размер
+            self.update_brightness()
 
     def update_brightness(self):
         """Создаёт полупрозрачный оверлей для регулировки яркости"""
         if hasattr(self.settings, 'brightness'):
             brightness = self.settings.brightness
-            # Яркость: 0 = полностью чёрный, 100 = прозрачный
-            alpha = int((100 - brightness) * 2.55)  # от 0 до 255
+            alpha = int((100 - brightness) * 2.55)
             alpha = max(0, min(255, alpha))
-            
             w = self.screen.get_width()
             h = self.screen.get_height()
             self.brightness_overlay = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -303,12 +361,11 @@ class SettingsMenu:
         screen_w = self.screen.get_width()
         screen_h = self.screen.get_height()
         
-        # Инициализируем оверлей яркости
         if not hasattr(self.settings, 'brightness'):
             self.settings.brightness = 100
         self.update_brightness()
 
-        # Отрисовка фона (видео или картинка)
+        # Отрисовка фона
         if self.video_frames:
             self.current_video_frame = (self.current_video_frame + 1) % len(self.video_frames)
             frame = self.video_frames[self.current_video_frame]
@@ -323,7 +380,6 @@ class SettingsMenu:
             overlay.fill((0, 0, 0, 180))
             self.screen.blit(overlay, (0, 0))
 
-        # Применяем яркость к фону
         if self.brightness_overlay:
             self.screen.blit(self.brightness_overlay, (0, 0))
 
@@ -363,9 +419,6 @@ class SettingsMenu:
                 state = "ON" if item["value"] else "OFF"
                 toggle_surf = self.small_font.render(state, True, GOLD if item["value"] else RED)
                 toggle_rect = toggle_surf.get_rect(topleft=(start_x + 250, y))
-                # Сохраняем rect для определения клика мышью
-                if not hasattr(self, 'toggle_rects'):
-                    self.toggle_rects = {}
                 self.toggle_rects[i] = toggle_rect
                 self.screen.blit(toggle_surf, (start_x + 250, y))
 
@@ -402,7 +455,7 @@ class SettingsMenu:
                             self.update_value(self.selected_option, new_val)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
-                    # Проверка клика по ползунку
+                    # Ползунки
                     for i, item in enumerate(self.menu_items):
                         if item["type"] == "slider":
                             y = start_y + i * item_height
@@ -413,7 +466,7 @@ class SettingsMenu:
                                 self.drag_index = i
                                 self._set_slider_from_mouse(i, mouse_x, slider_x, slider_width)
                                 break
-                    # Клик по стрелкам выбора разрешения
+                    # Стрелки выбора
                     for i, item in enumerate(self.menu_items):
                         if item["type"] == "choice":
                             y = start_y + i * item_height
@@ -421,14 +474,14 @@ class SettingsMenu:
                                 self._change_value(-1, i)
                             elif start_x + 370 <= mouse_x <= start_x + 390 and y <= mouse_y <= y + 30:
                                 self._change_value(1, i)
-                    # КЛИК ПО ТОГГЛУ (ON/OFF) - НОВАЯ ИНТЕГРАЦИЯ МЫШИ
+                    # Тоггл
                     for i, item in enumerate(self.menu_items):
-                        if item["type"] == "toggle" and hasattr(self, 'toggle_rects'):
-                            if i in self.toggle_rects and self.toggle_rects[i].collidepoint(mouse_x, mouse_y):
+                        if item["type"] == "toggle" and i in self.toggle_rects:
+                            if self.toggle_rects[i].collidepoint(mouse_x, mouse_y):
                                 new_val = not item["value"]
                                 self.update_value(i, new_val)
                                 break
-                    # Клик по кнопке "Назад"
+                    # Кнопка "Назад"
                     for i, item in enumerate(self.menu_items):
                         if item["type"] == "button":
                             btn_w, btn_h = 200, 50
@@ -480,7 +533,6 @@ class SettingsMenu:
 
 
 def show_settings(screen, game_settings):
-    """Вызывает меню настроек и возвращает управление"""
     settings_menu = SettingsMenu(screen, game_settings)
     while True:
         result = settings_menu.run()
