@@ -1,0 +1,214 @@
+import os
+
+import pygame
+from settings import *
+from player import _load_sprite
+
+KNIGHT_IMAGE = os.path.join("assets", "images", "player", "knight.jpg")
+
+CHARACTERS = [
+    {
+        "name": "Рыцарь",
+        "description": "Крепкий и сильный. Медленный, но не умирает.",
+        "hp": 120,
+        "attack": 15,
+        "speed": 3,
+        "color": (200, 60, 60),
+        "image": KNIGHT_IMAGE,
+    },
+    {
+        "name": "Маг",
+        "description": "Слабый физически, но магия очень мощная.",
+        "hp": 60,
+        "attack": 30,
+        "speed": 4,
+        "image": "assets/images/player/mag.jpg",
+        "mana": 100
+    },
+    {
+        "name": "Разбойник",
+        "description": "Быстрый и ловкий. Средние характеристики.",
+        "hp": 80,
+        "attack": 20,
+        "speed": 6,
+        "color": (60, 180, 60),
+    },
+]
+
+class CharacterSelect:
+    def __init__(self, screen, game_settings):
+        self.screen = screen
+        self.settings = game_settings
+        self.clock = pygame.time.Clock()
+        self.selected = 0
+
+        base_path = os.path.join("assets", "fonts")
+
+        title_path = os.path.join(base_path, "PlayfairDisplaySC-Bold.ttf")
+        if os.path.exists(title_path):
+            self.title_font = pygame.font.Font(title_path, 64)
+        else:
+            self.title_font = pygame.font.Font(None, 64)
+
+        btn_path = os.path.join(base_path, "Philosopher-Bold.ttf")
+        if os.path.exists(btn_path):
+            self.name_font = pygame.font.Font(btn_path, 38)
+            self.stat_font = pygame.font.Font(btn_path, 24)
+            self.hint_font = pygame.font.Font(btn_path, 20)
+        else:
+            self.name_font = pygame.font.Font(None, 38)
+            self.stat_font = pygame.font.Font(None, 24)
+            self.hint_font = pygame.font.Font(None, 20)
+
+    def _wrap_text(self, text, font, max_width):
+        words = text.split(" ")
+        lines = []
+        current_line = ""
+
+        for word in words:
+            test_line = current_line + word + " "
+            if font.size(test_line)[0] <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line.strip())
+                current_line = word + " "
+
+        if current_line:
+            lines.append(current_line.strip())
+
+        return lines
+
+    def _draw_stat_bar(self, x, y, label, value, max_value, color, bar_w):
+        label_surf = self.stat_font.render(label, True, WHITE)
+        self.screen.blit(label_surf, (x, y))
+
+        bar_x = x + 105
+        bar_h = 12
+
+        pygame.draw.rect(self.screen, (60, 60, 60), (bar_x, y + 5, bar_w, bar_h), border_radius=5)
+        fill_w = int(bar_w * value / max_value)
+        pygame.draw.rect(self.screen, color, (bar_x, y + 5, fill_w, bar_h), border_radius=5)
+
+        val_surf = self.stat_font.render(str(value), True, GOLD)
+        self.screen.blit(val_surf, (bar_x + bar_w + 8, y))
+
+    def _draw_card(self, char, cx, cy, card_w, card_h, is_selected):
+        border_color = GOLD if is_selected else (80, 80, 80)
+        alpha = 220 if is_selected else 140
+
+        card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        card.fill((20, 20, 20, alpha))
+        pygame.draw.rect(card, border_color, (0, 0, card_w, card_h), 3, border_radius=14)
+        self.screen.blit(card, (cx, cy))
+
+        avatar_cx = cx + card_w // 2
+        avatar_cy = cy + 75
+        avatar_r = 42
+
+        image_path = char.get("image")
+        sprite = _load_sprite(image_path, avatar_r * 2)
+        if sprite:
+            sprite_rect = sprite.get_rect(center=(avatar_cx, avatar_cy))
+            self.screen.blit(sprite, sprite_rect)
+        else:
+            pygame.draw.circle(self.screen, (40, 40, 40), (avatar_cx + 3, avatar_cy + 3), avatar_r + 2)
+            pygame.draw.circle(self.screen, char["color"], (avatar_cx, avatar_cy), avatar_r)
+            pygame.draw.circle(self.screen, WHITE, (avatar_cx, avatar_cy), avatar_r, 2)
+
+            first_letter = char["name"][0]
+            letter_surf = self.name_font.render(first_letter, True, WHITE)
+            letter_rect = letter_surf.get_rect(center=(avatar_cx, avatar_cy))
+            self.screen.blit(letter_surf, letter_rect)
+
+        name_surf = self.name_font.render(char["name"], True, GOLD if is_selected else WHITE)
+        name_rect = name_surf.get_rect(centerx=cx + card_w // 2, top=cy + 130)
+        self.screen.blit(name_surf, name_rect)
+
+        padding = 16
+        desc_lines = self._wrap_text(char["description"], self.hint_font, card_w - padding * 2)
+        for j, line in enumerate(desc_lines):
+            line_surf = self.hint_font.render(line, True, (180, 180, 180))
+            line_rect = line_surf.get_rect(centerx=cx + card_w // 2, top=cy + 178 + j * 22)
+            self.screen.blit(line_surf, line_rect)
+
+        bar_w = card_w - 95 - 14 - 14 - 40
+        stat_x = cx + 14
+        self._draw_stat_bar(stat_x, cy + 235, "HP", char["hp"], 120, (220, 60, 60), bar_w)
+        self._draw_stat_bar(stat_x, cy + 268, "Атака", char["attack"], 30, (220, 160, 40), bar_w)
+        self._draw_stat_bar(stat_x, cy + 301, "Скорость", char["speed"], 6, (60, 180, 220), bar_w)
+
+        if is_selected:
+            hint = self.hint_font.render("[ Enter / Клик — выбрать ]", True, GOLD)
+            hint_rect = hint.get_rect(centerx=cx + card_w // 2, top=cy + card_h - 34)
+            self.screen.blit(hint, hint_rect)
+
+    def run(self):
+        sw = self.screen.get_width()
+        sh = self.screen.get_height()
+
+        card_w = 320
+        card_h = 420
+        gap = 40
+        total_w = len(CHARACTERS) * card_w + (len(CHARACTERS) - 1) * gap
+        start_x = sw // 2 - total_w // 2
+        cards_y = sh // 2 - card_h // 2 + 20
+
+        while True:
+            self.screen.fill((15, 15, 25))
+
+            overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+            for i in range(sh):
+                alpha = int(60 * i / sh)
+                pygame.draw.line(overlay, (30, 10, 60, alpha), (0, i), (sw, i))
+            self.screen.blit(overlay, (0, 0))
+
+            title_surf = self.title_font.render("ВЫБОР ПЕРСОНАЖА", True, GOLD)
+            title_rect = title_surf.get_rect(centerx=sw // 2, top=30)
+            self.screen.blit(title_surf, title_rect)
+
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+
+            for i, char in enumerate(CHARACTERS):
+                cx = start_x + i * (card_w + gap)
+                card_rect = pygame.Rect(cx, cards_y, card_w, card_h)
+                if card_rect.collidepoint(mouse_x, mouse_y):
+                    self.selected = i
+                self._draw_card(char, cx, cards_y, card_w, card_h, i == self.selected)
+
+            arrow_left = self.name_font.render("◀", True, GOLD if self.selected > 0 else (60, 60, 60))
+            arrow_right = self.name_font.render("▶", True, GOLD if self.selected < len(CHARACTERS) - 1 else (60, 60, 60))
+            self.screen.blit(arrow_left, (start_x - 50, cards_y + card_h // 2 - 20))
+            self.screen.blit(arrow_right, (start_x + total_w + 16, cards_y + card_h // 2 - 20))
+
+            back_hint = self.hint_font.render("ESC — назад в меню", True, (120, 120, 120))
+            self.screen.blit(back_hint, (20, sh - 34))
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return None
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_LEFT:
+                        self.selected = max(0, self.selected - 1)
+                    elif event.key == pygame.K_RIGHT:
+                        self.selected = min(len(CHARACTERS) - 1, self.selected + 1)
+                    elif event.key == pygame.K_RETURN:
+                        return dict(CHARACTERS[self.selected])
+                    elif event.key == pygame.K_ESCAPE:
+                        return None
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    for i in range(len(CHARACTERS)):
+                        cx = start_x + i * (card_w + gap)
+                        card_rect = pygame.Rect(cx, cards_y, card_w, card_h)
+                        if card_rect.collidepoint(event.pos):
+                            if self.selected == i:
+                                return dict(CHARACTERS[self.selected])
+                            self.selected = i
+
+            pygame.display.flip()
+            self.clock.tick(60)
+
+
+def show_character_select(screen, game_settings):
+    cs = CharacterSelect(screen, game_settings)
+    return cs.run()
