@@ -10,6 +10,8 @@ MAP_HEIGHT = 20
 DEFAULT_SCREEN_W = 1280   # <-- добавлено
 DEFAULT_SCREEN_H = 720    # <-- добавлено
 FPS = 60
+PLAYER_SPEED = 300
+DEFAULT_PLAYER_SPEED = 300
 
 # ========== ЦВЕТА ==========
 BLACK = (0, 0, 0)
