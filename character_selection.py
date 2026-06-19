@@ -23,7 +23,8 @@ CHARACTERS = [
         "attack": 30,
         "speed": 4,
         "image": "assets/images/player/mag.jpg",
-        "mana": 100
+        "mana": 100,
+        "color": (80, 80, 220),
     },
     {
         "name": "Разбойник",
@@ -31,6 +32,7 @@ CHARACTERS = [
         "hp": 80,
         "attack": 20,
         "speed": 6,
+        "image": "assets/images/player/razboynik.jpg",
         "color": (60, 180, 60),
     },
 ]
@@ -104,7 +106,7 @@ class CharacterSelect:
 
         avatar_cx = cx + card_w // 2
         avatar_cy = cy + 75
-        avatar_r = 42
+        avatar_r = 100
 
         image_path = char.get("image")
         sprite = _load_sprite(image_path, avatar_r * 2)
@@ -176,8 +178,8 @@ class CharacterSelect:
                     self.selected = i
                 self._draw_card(char, cx, cards_y, card_w, card_h, i == self.selected)
 
-            arrow_left = self.name_font.render("◀", True, GOLD if self.selected > 0 else (60, 60, 60))
-            arrow_right = self.name_font.render("▶", True, GOLD if self.selected < len(CHARACTERS) - 1 else (60, 60, 60))
+            arrow_left = self.name_font.render("<", True, GOLD if self.selected > 0 else (60, 60, 60))
+            arrow_right = self.name_font.render(">", True, GOLD if self.selected < len(CHARACTERS) - 1 else (60, 60, 60))
             self.screen.blit(arrow_left, (start_x - 50, cards_y + card_h // 2 - 20))
             self.screen.blit(arrow_right, (start_x + total_w + 16, cards_y + card_h // 2 - 20))
 
