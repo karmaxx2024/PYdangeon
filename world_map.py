@@ -44,6 +44,7 @@ class DungeonGenerator:
         self.corridors = []
         self.walls = []  # стены для коллизий
         self.collision_rects = []
+        self.door_positions = []  # для хранения позиций дверей
         
         # Генерируем подземелье
         self.generate_dungeon()
@@ -58,7 +59,7 @@ class DungeonGenerator:
         BIG_MIN, BIG_MAX = 11, 15       # большие комнаты
         
         # Создаём границы карты (внешние стены)
-        self.create_border_walls()
+        self.fill_map_with_walls()
         
         # Генерируем комнаты разных размеров
         room_types = ["small", "medium", "big"]
@@ -134,6 +135,11 @@ class DungeonGenerator:
             for y in range(self.height):
                 if x == 0 or x == self.width - 1 or y == 0 or y == self.height - 1:
                     self.add_wall(x, y)
+
+    def fill_map_with_walls(self):
+        for x in range(self.width):
+            for y in range(self.height):
+                self.add_wall(x, y)
     
     def carve_room(self, room):
         """Прорезает комнату (убирает стены внутри)"""
@@ -175,6 +181,8 @@ class DungeonGenerator:
         """Соединяет комнаты коридорами (алгоритм минимального остовного дерева)"""
         if len(self.rooms) < 2:
             return
+        for i in range(1, len(self.rooms)):
+            self.create_corridor(self.rooms[i - 1], self.rooms[i])
         
         # Находим ближайших соседей для каждой комнаты
         connections = []
@@ -252,6 +260,126 @@ class DungeonGenerator:
                 if neighbors >= 2 and random.random() < 0.3:
                     self.add_wall(x, y)
     
+    # ===== НОВЫЕ МЕТОДЫ ДЛЯ ФАКЕЛОВ И ДВЕРЕЙ =====
+    
+    def get_torch_positions(self):
+        """Возвращает список позиций для факелов на стенах"""
+        torch_positions = []
+        
+        for room in self.rooms:
+            room_center_x = room.x + room.w // 2
+            room_center_y = room.y + room.h // 2
+            
+            # Добавляем факелы на стены каждой комнаты (по 2-4 факела на комнату)
+            num_torches = random.randint(2, 4)
+            
+            for _ in range(num_torches):
+                # Выбираем случайную стену
+                wall = random.choice(['left', 'right', 'top', 'bottom'])
+                
+                if wall == 'left':
+                    x = room.x
+                    y = random.randint(room.y + 3, room.y + room.h - 4)
+                elif wall == 'right':
+                    x = room.x + room.w - 1
+                    y = random.randint(room.y + 3, room.y + room.h - 4)
+                elif wall == 'top':
+                    x = random.randint(room.x + 3, room.x + room.w - 4)
+                    y = room.y
+                else:  # bottom
+                    x = random.randint(room.x + 3, room.x + room.w - 4)
+                    y = room.y + room.h - 1
+                
+                # Проверяем, что факел не попал в дверной проём
+                is_valid = True
+                for door in self.door_positions:
+                    door_rect = pygame.Rect(door[0] - 2, door[1] - 2, door[2] + 4, door[3] + 4)
+                    if door_rect.collidepoint(x, y):
+                        is_valid = False
+                        break
+                
+                if is_valid:
+                    # Переводим в пиксели
+                    pixel_x = x * TILE_SIZE + TILE_SIZE // 2
+                    pixel_y = y * TILE_SIZE + TILE_SIZE // 2
+                    torch_positions.append((pixel_x, pixel_y, room_center_x * TILE_SIZE, room_center_y * TILE_SIZE))
+        
+        return torch_positions
+
+    def get_door_positions(self):
+        """Возвращает список позиций для дверей между комнатами"""
+        door_positions = []
+        self.door_positions = []  # Сохраняем для проверок
+        
+        # Находим комнаты, которые соприкасаются
+        for i, room1 in enumerate(self.rooms):
+            for j, room2 in enumerate(self.rooms):
+                if i >= j:
+                    continue
+                
+                # Проверяем, соприкасаются ли комнаты
+                # Проверяем, есть ли общая стена
+                
+                # Горизонтальное соединение (комнаты рядом по горизонтали)
+                if (room1.x + room1.w == room2.x or room2.x + room2.w == room1.x):
+                    # Проверяем, что они перекрываются по вертикали
+                    if (room1.y < room2.y + room2.h and room2.y < room1.y + room1.h):
+                        # Определяем, какая комната слева
+                        if room1.x + room1.w == room2.x:  # room1 слева от room2
+                            left_room = room1
+                            right_room = room2
+                        else:  # room2 слева от room1
+                            left_room = room2
+                            right_room = room1
+                        
+                        # Находим общую область по вертикали
+                        top = max(left_room.y, right_room.y)
+                        bottom = min(left_room.y + left_room.h, right_room.y + right_room.h)
+                        
+                        if bottom - top > 4:  # Если общая стена достаточно длинная
+                            door_y = random.randint(top + 1, bottom - 2)
+                            door_x = left_room.x + left_room.w
+                            
+                            door_data = (door_x, door_y, 1, 3)
+                            self.door_positions.append(door_data)
+                            door_positions.append((
+                                door_x * TILE_SIZE + TILE_SIZE // 2,
+                                door_y * TILE_SIZE + TILE_SIZE // 2,
+                                10,  # ширина двери в пикселях
+                                40   # высота двери в пикселях
+                            ))
+                
+                # Вертикальное соединение (комнаты друг над другом)
+                if (room1.y + room1.h == room2.y or room2.y + room2.h == room1.y):
+                    # Проверяем, что они перекрываются по горизонтали
+                    if (room1.x < room2.x + room2.w and room2.x < room1.x + room1.w):
+                        # Определяем, какая комната сверху
+                        if room1.y + room1.h == room2.y:  # room1 над room2
+                            top_room = room1
+                            bottom_room = room2
+                        else:  # room2 над room1
+                            top_room = room2
+                            bottom_room = room1
+                        
+                        # Находим общую область по горизонтали
+                        left = max(top_room.x, bottom_room.x)
+                        right = min(top_room.x + top_room.w, bottom_room.x + bottom_room.w)
+                        
+                        if right - left > 4:  # Если общая стена достаточно длинная
+                            door_x = random.randint(left + 1, right - 2)
+                            door_y = top_room.y + top_room.h
+                            
+                            door_data = (door_x, door_y, 3, 1)
+                            self.door_positions.append(door_data)
+                            door_positions.append((
+                                door_x * TILE_SIZE + TILE_SIZE // 2,
+                                door_y * TILE_SIZE + TILE_SIZE // 2,
+                                40,  # ширина двери в пикселях
+                                10   # высота двери в пикселях
+                            ))
+        
+        return door_positions
+    
     def check_collision(self, rect, dx, dy):
         """Проверяет столкновение при движении"""
         if not self.collision_rects:
@@ -292,6 +420,12 @@ class DungeonGenerator:
             screen_x = room.rect.x - camera_x
             screen_y = room.rect.y - camera_y
             pygame.draw.rect(screen, (0, 100, 255), (screen_x, screen_y, room.rect.width, room.rect.height), 2)
+        
+        # Рисуем позиции дверей (зелёные точки)
+        for door in self.door_positions:
+            door_x = door[0] * TILE_SIZE - camera_x
+            door_y = door[1] * TILE_SIZE - camera_y
+            pygame.draw.circle(screen, (0, 255, 0), (int(door_x), int(door_y)), 5)
     
     def get_map_size_pixels(self):
         """Возвращает размер карты в пикселях"""
