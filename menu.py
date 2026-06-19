@@ -146,7 +146,7 @@ class Menu:
             self.screen.blit(title_shadow, shadow_rect)
             self.screen.blit(title, title_rect)
 
-            subtitle = self.hint_font.render("Overgrown Labyrinth", True, (180, 200, 150))
+            subtitle = self.hint_font.render("!Let's Go travel through dungeons!", True, (180, 200, 150))
             subtitle_rect = subtitle.get_rect(center=(screen_w // 2, screen_h // 4 + 70))
             self.screen.blit(subtitle, subtitle_rect)
 
