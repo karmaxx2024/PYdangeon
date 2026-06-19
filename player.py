@@ -21,7 +21,7 @@ class Player:
     def __init__(self, x, y, char_data):
         """
         Создаёт игрока
-        
+
         Args:
             x, y: начальная позиция в пикселях
             char_data: словарь с данными персонажа (speed, hp, attack, color, name, image)
@@ -38,18 +38,19 @@ class Player:
         # Загружаем спрайт
         image_path = char_data.get("image")
         self.image = _load_sprite(image_path, 96) if image_path else None
-        self.size = 16  # радиус/половина размера игрока
-        
+        self.size = 16  # половина спрайта для отрисовки
+
         if self.image:
             self.size = max(self.image.get_width(), self.image.get_height()) // 2
         elif image_path:
             print("Нет картинки:", image_path)
-        
-        # Создаём прямоугольник для коллизий
-        self.rect = pygame.Rect(0, 0, self.size * 2, self.size * 2)
+
+        # Хитбокс меньше спрайта — без прозрачных полей картинки
+        hitbox_half = 14
+        self.rect = pygame.Rect(0, 0, hitbox_half * 2, hitbox_half * 2)
         self.rect.center = (int(self.x), int(self.y))
-        
-        print(f"✓ Игрок {self.name} создан. Скорость: {self.speed}, Размер: {self.rect.size}")
+
+        print(f"✓ Игрок {self.name} создан. Скорость: {self.speed}, Хитбокс: {self.rect.size}")
 
     def update(self, dt, screen_w, screen_h):
         """
@@ -83,16 +84,15 @@ class Player:
         half = self.size
         self.x = max(half, min(screen_w - half, self.x))
         self.y = max(half, min(screen_h - half, self.y))
-        
+
         # Обновляем прямоугольник
         self.rect.center = (int(self.x), int(self.y))
 
-    def update_with_collision(self, dt, keys, world_map, is_paused=False):
-        """Движение с коллизиями (с поддержкой паузы)"""
+    def update_with_collision(self, dt, keys, world_map, doors=None, is_paused=False):
+        """Движение с коллизиями со стенами и дверями (с поддержкой паузы)"""
         if is_paused:
             return  # Не двигаемся на паузе
-        """Новый метод - движение с коллизиями на карте мира
-        Используется в основной игре"""
+        
         # Вычисляем направление
         dx = 0
         dy = 0
@@ -112,21 +112,52 @@ class Player:
             dy *= 0.707
 
         # Скорость в пикселях в секунду
-        move_distance = self.speed * dt
+        move_x = dx * self.speed * dt * 60
+        move_y = dy * self.speed * dt * 60
+
+        # Сохраняем старую позицию для отката
+        old_x = self.x
+        old_y = self.y
+
+        # === ДВИЖЕНИЕ ПО X ===
+        self.x += move_x
+        self.rect.centerx = int(self.x)
         
-        # Пробуем движение по X
-        test_rect = self.rect.move(dx * move_distance, 0)
-        if not world_map.check_collision(test_rect, 0, 0):
-            self.rect.x += dx * move_distance
+        # Проверка коллизий со стенами по X
+        if world_map.check_collision(self.rect, 0, 0):
+            self.x -= move_x
+            self.rect.centerx = int(self.x)
         
-        # Пробуем движение по Y
-        test_rect = self.rect.move(0, dy * move_distance)
-        if not world_map.check_collision(test_rect, 0, 0):
-            self.rect.y += dy * move_distance
+        # === НОВОЕ: Проверка коллизий с дверями по X ===
+        if doors:
+            for door in doors:
+                if door.is_blocked and door.rect.colliderect(self.rect):
+                    if move_x > 0:  # Движение вправо
+                        self.rect.right = door.rect.left
+                        self.x = self.rect.centerx
+                    elif move_x < 0:  # Движение влево
+                        self.rect.left = door.rect.right
+                        self.x = self.rect.centerx
+
+        # === ДВИЖЕНИЕ ПО Y ===
+        self.y += move_y
+        self.rect.centery = int(self.y)
         
-        # Обновляем float координаты для совместимости со старыми методами
-        self.x = float(self.rect.centerx)
-        self.y = float(self.rect.centery)
+        # Проверка коллизий со стенами по Y
+        if world_map.check_collision(self.rect, 0, 0):
+            self.y -= move_y
+            self.rect.centery = int(self.y)
+        
+        # === НОВОЕ: Проверка коллизий с дверями по Y ===
+        if doors:
+            for door in doors:
+                if door.is_blocked and door.rect.colliderect(self.rect):
+                    if move_y > 0:  # Движение вниз
+                        self.rect.bottom = door.rect.top
+                        self.y = self.rect.centery
+                    elif move_y < 0:  # Движение вверх
+                        self.rect.top = door.rect.bottom
+                        self.y = self.rect.centery
 
     def draw(self, screen):
         """
@@ -153,26 +184,25 @@ class Player:
         hp_fill = int(bar_w * self.hp / self.max_hp)
         pygame.draw.rect(screen, (220, 50, 50), (bar_x, bar_y, hp_fill, bar_h), border_radius=3)
         pygame.draw.rect(screen, WHITE, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=3)
-    
+
     def draw_with_camera(self, screen, camera_x, camera_y):
         """
         Отрисовка игрока с учётом камеры
         Используется в основной игре
         """
-        screen_x = self.rect.x - camera_x
-        screen_y = self.rect.y - camera_y
-        
+        center_x = int(self.x) - camera_x
+        center_y = int(self.y) - camera_y
+
         if self.image:
-            rect = self.image.get_rect(center=(screen_x + self.size, screen_y + self.size))
-            screen.blit(self.image, rect)
+            sprite_rect = self.image.get_rect(center=(center_x, center_y))
+            screen.blit(self.image, sprite_rect)
         else:
-            pygame.draw.circle(screen, self.color, (screen_x + self.size, screen_y + self.size), self.size)
-        
-        # Полоска HP (относительно камеры)
+            pygame.draw.circle(screen, self.color, (center_x, center_y), self.size)
+
         bar_w = 50
         bar_h = 7
-        bar_x = screen_x + self.size - bar_w // 2
-        bar_y = screen_y - 16
+        bar_x = center_x - bar_w // 2
+        bar_y = center_y - self.size - 16
 
         pygame.draw.rect(screen, (80, 0, 0), (bar_x, bar_y, bar_w, bar_h), border_radius=3)
         hp_fill = int(bar_w * self.hp / self.max_hp)
@@ -183,7 +213,7 @@ class Player:
         """Рисует HUD (интерфейс) с информацией о игроке"""
         hp_text = font.render(f"{self.name}   HP: {self.hp} / {self.max_hp}", True, WHITE)
         screen.blit(hp_text, (16, 16))
-    
+
     def take_damage(self, damage):
         """Наносит урон игроку"""
         self.hp -= damage
@@ -191,18 +221,18 @@ class Player:
             self.hp = 0
         print(f"{self.name} получил {damage} урона! HP: {self.hp}/{self.max_hp}")
         return self.hp <= 0  # Возвращает True если игрок умер
-    
+
     def heal(self, amount):
         """Лечит игрока"""
         self.hp += amount
         if self.hp > self.max_hp:
             self.hp = self.max_hp
         print(f"{self.name} вылечился на {amount}. HP: {self.hp}/{self.max_hp}")
-    
+
     def get_rect(self):
         """Возвращает прямоугольник игрока для коллизий"""
         return self.rect
-    
+
     def is_alive(self):
         """Проверяет, жив ли игрок"""
         return self.hp > 0
