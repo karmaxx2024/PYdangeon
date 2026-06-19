@@ -73,7 +73,7 @@ def load_floor_tile(path=None, tile_size=TILE_SIZE, col=0, row=0):
 
 def draw_floor(screen, base_tile, moss_tile=None, layout=None):
     """
-    Рисует пол на весь экран
+    Рисует пол на весь экран (без камеры - для меню и т.д.)
     """
     if not base_tile:
         screen.fill((20, 12, 30))
@@ -93,6 +93,45 @@ def draw_floor(screen, base_tile, moss_tile=None, layout=None):
             )
             tile = moss_tile if use_moss else base_tile
             screen.blit(tile, (x, y))
+
+
+def draw_floor_with_camera(screen, base_tile, moss_tile, layout, camera_x, camera_y):
+    """
+    Рисует пол с учётом камеры (для основной игры)
+    """
+    if not base_tile:
+        screen.fill((20, 12, 30))
+        return
+    
+    sw, sh = screen.get_size()
+    tw, th = base_tile.get_size()
+    
+    # Если layout нет, рисуем просто текстуру на весь экран
+    if not layout:
+        for row, y in enumerate(range(0, sh, th)):
+            for col, x in enumerate(range(0, sw, tw)):
+                screen.blit(base_tile, (x, y))
+        return
+    
+    # Рассчитываем, какие тайлы видны
+    start_x = max(0, camera_x // tw)
+    start_y = max(0, camera_y // th)
+    end_x = min(len(layout[0]) if layout and len(layout) > 0 else 0, (camera_x + sw) // tw + 1)
+    end_y = min(len(layout) if layout else 0, (camera_y + sh) // th + 1)
+    
+    for row in range(start_y, end_y):
+        for col in range(start_x, end_x):
+            screen_x = col * tw - camera_x
+            screen_y = row * th - camera_y
+            
+            # Проверяем, что координаты валидны
+            if row < 0 or row >= len(layout) or col < 0 or col >= len(layout[row]):
+                use_moss = False
+            else:
+                use_moss = moss_tile is not None and layout[row][col]
+            
+            tile = moss_tile if use_moss else base_tile
+            screen.blit(tile, (screen_x, screen_y))
 
 
 def draw_walls(screen, wall_tile, map_width, map_height, camera_x=0, camera_y=0, show_collision=False, collision_rects=None):
