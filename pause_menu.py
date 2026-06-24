@@ -26,6 +26,13 @@ class PauseMenu:
         self.overlay.fill((0, 0, 0))
         
         print("✓ PauseMenu готов")
+
+    def update_screen(self, screen):
+        """Обновить размеры после смены разрешения."""
+        self.screen = screen
+        self.overlay = pygame.Surface((screen.get_width(), screen.get_height()))
+        self.overlay.set_alpha(180)
+        self.overlay.fill((0, 0, 0))
     
     def toggle(self):
         """Переключает состояние паузы"""

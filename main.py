@@ -5,11 +5,11 @@ from menu import show_menu, show_settings
 from settings import GameSettings
 from character_selection import show_character_select
 from player import Player
-from tilemap import load_floor_tile, load_wall_tile, draw_floor_with_camera, generate_floor_layout, FLOOR_IMAGE, FLOOR_MOSS_IMAGE
-from world_map import DungeonGenerator
+from tilemap import load_floor_tile, load_wall_tile, draw_floor_with_camera, generate_floor_layout, FLOOR_IMAGE, \
+    FLOOR_MOSS_IMAGE
+from world_map import DungeonGenerator, calc_maze_tiles, update_camera
 from objects import Torch, Door
 from pause_menu import PauseMenu
-
 
 
 def game_loop(screen, settings, char_data):
@@ -20,11 +20,8 @@ def game_loop(screen, settings, char_data):
     sw = screen.get_width()
     sh = screen.get_height()
 
-    # ===== ГЕНЕРИРУЕМ ПОДЗЕМЕЛЬЕ (каждый раз разное!) =====
-    WORLD_WIDTH_TILES = 50  # ширина в тайлах
-    WORLD_HEIGHT_TILES = 40  # высота в тайлах
-
-    # Каждый запуск - новое подземелье!
+    # ===== ГЕНЕРИРУЕМ ПОДЗЕМЕЛЬЕ под текущее разрешение =====
+    WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES = calc_maze_tiles(sw, sh, TILE_SIZE)
     dungeon = DungeonGenerator(WORLD_WIDTH_TILES, WORLD_HEIGHT_TILES)
 
     # Получаем размер карты в пикселях
@@ -39,9 +36,10 @@ def game_loop(screen, settings, char_data):
     floor_moss_tile = load_floor_tile(FLOOR_MOSS_IMAGE)
     floor_layout = generate_floor_layout(map_width_px, map_height_px, TILE_SIZE, moss_chance=0.20)
     wall_tile = load_wall_tile()
-    
+    wall_texture_ok = wall_tile is not None
+
     # ПРОВЕРКА: загрузилась ли текстура стены?
-    if wall_tile is None:
+    if not wall_texture_ok:
         print("⚠️ ВНИМАНИЕ: Текстура стены не загружена! Будет использован серый цвет.")
         # Создаём заглушку
         wall_tile = pygame.Surface((TILE_SIZE, TILE_SIZE))
@@ -59,35 +57,35 @@ def game_loop(screen, settings, char_data):
 
     # ===== НОВОЕ: СОЗДАЁМ ОБЪЕКТЫ (ФАКЕЛЫ И ДВЕРИ) =====
     objects_group = pygame.sprite.Group()
-    
-    # Добавляем факелы на стены
-    torch_positions = dungeon.get_torch_positions()
-    for pos in torch_positions:
-        # Определяем направление факела (смотрит в центр комнаты)
-        x, y, room_center_x, room_center_y = pos
-        # Если факел слева от центра комнаты - смотрит вправо, и наоборот
-        if x < room_center_x:
-            direction = 'right'
-        else:
-            direction = 'left'
-        torch = Torch(x, y, direction)
-        objects_group.add(torch)
-    
-    # Добавляем двери между комнатами
+
+    # Двери нужны раньше — get_torch_positions проверяет дверные проёмы
     door_positions = dungeon.get_door_positions()
-    doors = []  # Сохраняем ссылки на двери для проверки коллизий
+    doors = []
     for door_data in door_positions:
         x, y, width, height = door_data
         door = Door(x, y, width, height, is_open=False)
         objects_group.add(door)
         doors.append(door)
 
-    print("=== ПОДЗЕМЕЛЬЕ СОЗДАНО ===")
-    print(f"Комнат: {len(dungeon.rooms)}")
+    torch_positions = dungeon.get_torch_positions()
+    for pos in torch_positions:
+        x, y, room_center_x, room_center_y, wall_side = pos
+        if wall_side == 'left':
+            direction = 'right'
+        elif wall_side == 'right':
+            direction = 'left'
+        elif wall_side == 'top':
+            direction = 'right'
+        else:
+            direction = 'left'
+        torch = Torch(x, y, direction, wall_side)
+        objects_group.add(torch)
+
+    print("=== ЛАБИРИНТ СОЗДАН ===")
     print(f"Стен: {len(dungeon.collision_rects)}")
     print(f"Факелов: {len(torch_positions)}")
     print(f"Дверей: {len(door_positions)}")
-    print(f"Текстура стены: {'загружена' if wall_tile else 'НЕ ЗАГРУЖЕНА'}")
+    print(f"Текстура стены: {'загружена' if wall_texture_ok else 'серый fallback'}")
     print("Нажми F3 для отладки, ESC — пауза, E — открыть/закрыть дверь")
 
     while True:
@@ -109,6 +107,8 @@ def game_loop(screen, settings, char_data):
             elif pause_action == "settings":
                 show_settings(screen, settings)
                 screen = pygame.display.get_surface()
+                sw, sh = screen.get_size()
+                pause_menu.update_screen(screen)
                 pause_menu.toggle()
             elif pause_action == "menu":
                 return True
@@ -118,9 +118,10 @@ def game_loop(screen, settings, char_data):
             screen.fill((20, 20, 30))
             draw_floor_with_camera(screen, floor_tile, floor_moss_tile, floor_layout, camera_x, camera_y)
             dungeon.draw(screen, camera_x, camera_y, wall_tile)
-            
+
             # Рисуем объекты
-            objects_group.draw(screen)
+            for obj in objects_group:
+                screen.blit(obj.image, (obj.rect.x - camera_x, obj.rect.y - camera_y))
 
             if debug_mode:
                 dungeon.draw_debug(screen, camera_x, camera_y)
@@ -157,13 +158,7 @@ def game_loop(screen, settings, char_data):
         # Обновляем объекты (анимация факелов и дверей)
         objects_group.update(dt)
 
-        # Камера следует за игроком
-        camera_x = player.rect.centerx - sw // 2
-        camera_y = player.rect.centery - sh // 2
-
-        # Ограничиваем камеру
-        camera_x = max(0, min(camera_x, map_width_px - sw))
-        camera_y = max(0, min(camera_y, map_height_px - sh))
+        camera_x, camera_y = update_camera(player, sw, sh, map_width_px, map_height_px)
 
         # --- ОТРИСОВКА ---
         screen.fill((20, 20, 30))
@@ -175,7 +170,8 @@ def game_loop(screen, settings, char_data):
         dungeon.draw(screen, camera_x, camera_y, wall_tile)
 
         # Рисуем объекты (факелы и двери)
-        objects_group.draw(screen)
+        for obj in objects_group:
+            screen.blit(obj.image, (obj.rect.x - camera_x, obj.rect.y - camera_y))
 
         # Отладка
         if debug_mode:
@@ -185,7 +181,6 @@ def game_loop(screen, settings, char_data):
             debug_font = pygame.font.Font(None, 20)
             info = [
                 f"FPS: {int(clock.get_fps())}",
-                f"Комнат: {len(dungeon.rooms)}",
                 f"Стен: {len(dungeon.collision_rects)}",
                 f"Позиция: ({player.rect.x}, {player.rect.y})",
                 f"Камера: ({camera_x}, {camera_y})",
@@ -195,15 +190,15 @@ def game_loop(screen, settings, char_data):
             for i, line in enumerate(info):
                 text = debug_font.render(line, True, (255, 255, 0))
                 screen.blit(text, (10, 100 + i * 20))
-            
+
             # Показываем зоны взаимодействия с дверями (зелёные рамки)
             for door in doors:
                 interaction_rect = door.rect.inflate(30, 30)
-                pygame.draw.rect(screen, (0, 255, 0), 
-                               (interaction_rect.x - camera_x, 
-                                interaction_rect.y - camera_y, 
-                                interaction_rect.width, 
-                                interaction_rect.height), 1)
+                pygame.draw.rect(screen, (0, 255, 0),
+                                 (interaction_rect.x - camera_x,
+                                  interaction_rect.y - camera_y,
+                                  interaction_rect.width,
+                                  interaction_rect.height), 1)
 
         # Рисуем игрока
         player.draw_with_camera(screen, camera_x, camera_y)
@@ -223,7 +218,7 @@ def game_loop(screen, settings, char_data):
             if interaction_rect.colliderect(player.rect) and not door.is_open:
                 near_door = True
                 break
-        
+
         if near_door:
             door_hint = hint_font.render("Нажми E, чтобы открыть дверь", True, (255, 255, 100))
             screen.blit(door_hint, (sw // 2 - door_hint.get_width() // 2, sh - 60))

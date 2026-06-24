@@ -1,6 +1,36 @@
 import pygame
 import random
 from settings import TILE_SIZE
+from main_generator import MazeGenerator
+
+
+def calc_maze_tiles(screen_w, screen_h, tile_size=TILE_SIZE, margin_tiles=8):
+    """Нечётный размер лабиринта: карта >= экран + запас для прокрутки камеры."""
+    def odd_at_least(n):
+        n = max(5, int(n))
+        return n if n % 2 == 1 else n + 1
+
+    width = odd_at_least(screen_w / tile_size + margin_tiles)
+    height = odd_at_least(screen_h / tile_size + margin_tiles)
+    return width, height
+
+
+def update_camera(player, sw, sh, map_width_px, map_height_px):
+    """Камера следует за игроком; у краёв карты — без чёрных полос."""
+    if map_width_px <= sw:
+        camera_x = (map_width_px - sw) // 2
+    else:
+        camera_x = player.rect.centerx - sw // 2
+        camera_x = max(0, min(camera_x, map_width_px - sw))
+
+    if map_height_px <= sh:
+        camera_y = (map_height_px - sh) // 2
+    else:
+        camera_y = player.rect.centery - sh // 2
+        camera_y = max(0, min(camera_y, map_height_px - sh))
+
+    return camera_x, camera_y
+
 
 class Room:
     """Комната в подземелье"""
@@ -34,20 +64,39 @@ class Room:
 
 
 class DungeonGenerator:
-    """Генератор подземелий с комнатами и коридорами"""
-    
+    """Генератор подземелья — лабиринт DFS из main_generator."""
+
     def __init__(self, width_tiles, height_tiles):
         self.width = width_tiles
         self.height = height_tiles
         self.tile_size = TILE_SIZE
         self.rooms = []
         self.corridors = []
-        self.walls = []  # стены для коллизий
+        self.walls = []
         self.collision_rects = []
-        self.door_positions = []  # для хранения позиций дверей
-        
-        # Генерируем подземелье
-        self.generate_dungeon()
+        self.door_positions = []
+
+        self.maze_gen = MazeGenerator(width_tiles, height_tiles)
+        self.maze_gen.generate()
+        self._build_collision_from_maze()
+
+        print("🏰 Лабиринт сгенерирован")
+        print(f"✓ Стен для коллизий: {len(self.collision_rects)}")
+
+    def _build_collision_from_maze(self):
+        self.walls = []
+        self.collision_rects = []
+        for y in range(self.height):
+            for x in range(self.width):
+                if self.maze_gen.maze[y][x]:
+                    rect = pygame.Rect(
+                        x * self.tile_size,
+                        y * self.tile_size,
+                        self.tile_size,
+                        self.tile_size,
+                    )
+                    self.walls.append((x, y, rect))
+                    self.collision_rects.append(rect)
     
     def generate_dungeon(self, max_rooms=15):
         """Генерирует подземелье с комнатами разных размеров"""
@@ -162,13 +211,11 @@ class DungeonGenerator:
                     self.collision_rects.remove(rect)
                 return True
         return False
-    
+
     def is_wall(self, x, y):
-        """Проверяет, есть ли стена на позиции"""
-        for wx, wy, _ in self.walls:
-            if wx == x and wy == y:
-                return True
-        return False
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return True
+        return self.maze_gen.maze[y][x]
 
     def is_in_room(self, x, y):
         """Проверяет, находится ли позиция внутри какой-либо комнаты"""
@@ -263,122 +310,47 @@ class DungeonGenerator:
     # ===== НОВЫЕ МЕТОДЫ ДЛЯ ФАКЕЛОВ И ДВЕРЕЙ =====
     
     def get_torch_positions(self):
-        """Возвращает список позиций для факелов на стенах"""
+        """Факелы на стенах лабиринта рядом с проходом."""
         torch_positions = []
-        
-        for room in self.rooms:
-            room_center_x = room.x + room.w // 2
-            room_center_y = room.y + room.h // 2
-            
-            # Добавляем факелы на стены каждой комнаты (по 2-4 факела на комнату)
-            num_torches = random.randint(2, 4)
-            
-            for _ in range(num_torches):
-                # Выбираем случайную стену
-                wall = random.choice(['left', 'right', 'top', 'bottom'])
-                
-                if wall == 'left':
-                    x = room.x
-                    y = random.randint(room.y + 3, room.y + room.h - 4)
-                elif wall == 'right':
-                    x = room.x + room.w - 1
-                    y = random.randint(room.y + 3, room.y + room.h - 4)
-                elif wall == 'top':
-                    x = random.randint(room.x + 3, room.x + room.w - 4)
-                    y = room.y
-                else:  # bottom
-                    x = random.randint(room.x + 3, room.x + room.w - 4)
-                    y = room.y + room.h - 1
-                
-                # Проверяем, что факел не попал в дверной проём
-                is_valid = True
-                for door in self.door_positions:
-                    door_rect = pygame.Rect(door[0] - 2, door[1] - 2, door[2] + 4, door[3] + 4)
-                    if door_rect.collidepoint(x, y):
-                        is_valid = False
-                        break
-                
-                if is_valid:
-                    # Переводим в пиксели
-                    pixel_x = x * TILE_SIZE + TILE_SIZE // 2
-                    pixel_y = y * TILE_SIZE + TILE_SIZE // 2
-                    torch_positions.append((pixel_x, pixel_y, room_center_x * TILE_SIZE, room_center_y * TILE_SIZE))
-        
+
+        for y in range(1, self.height - 1):
+            for x in range(1, self.width - 1):
+                if not self.is_wall(x, y):
+                    continue
+                if random.random() > 0.08:
+                    continue
+
+                if not self.is_wall(x + 1, y):
+                    torch_positions.append((
+                        (x + 1) * TILE_SIZE,
+                        y * TILE_SIZE + TILE_SIZE // 2,
+                        0, 0, 'left',
+                    ))
+                elif not self.is_wall(x - 1, y):
+                    torch_positions.append((
+                        x * TILE_SIZE,
+                        y * TILE_SIZE + TILE_SIZE // 2,
+                        0, 0, 'right',
+                    ))
+                elif not self.is_wall(x, y + 1):
+                    torch_positions.append((
+                        x * TILE_SIZE + TILE_SIZE // 2,
+                        (y + 1) * TILE_SIZE,
+                        0, 0, 'top',
+                    ))
+                elif not self.is_wall(x, y - 1):
+                    torch_positions.append((
+                        x * TILE_SIZE + TILE_SIZE // 2,
+                        y * TILE_SIZE,
+                        0, 0, 'bottom',
+                    ))
+
         return torch_positions
 
     def get_door_positions(self):
-        """Возвращает список позиций для дверей между комнатами"""
-        door_positions = []
-        self.door_positions = []  # Сохраняем для проверок
-        
-        # Находим комнаты, которые соприкасаются
-        for i, room1 in enumerate(self.rooms):
-            for j, room2 in enumerate(self.rooms):
-                if i >= j:
-                    continue
-                
-                # Проверяем, соприкасаются ли комнаты
-                # Проверяем, есть ли общая стена
-                
-                # Горизонтальное соединение (комнаты рядом по горизонтали)
-                if (room1.x + room1.w == room2.x or room2.x + room2.w == room1.x):
-                    # Проверяем, что они перекрываются по вертикали
-                    if (room1.y < room2.y + room2.h and room2.y < room1.y + room1.h):
-                        # Определяем, какая комната слева
-                        if room1.x + room1.w == room2.x:  # room1 слева от room2
-                            left_room = room1
-                            right_room = room2
-                        else:  # room2 слева от room1
-                            left_room = room2
-                            right_room = room1
-                        
-                        # Находим общую область по вертикали
-                        top = max(left_room.y, right_room.y)
-                        bottom = min(left_room.y + left_room.h, right_room.y + right_room.h)
-                        
-                        if bottom - top > 4:  # Если общая стена достаточно длинная
-                            door_y = random.randint(top + 1, bottom - 2)
-                            door_x = left_room.x + left_room.w
-                            
-                            door_data = (door_x, door_y, 1, 3)
-                            self.door_positions.append(door_data)
-                            door_positions.append((
-                                door_x * TILE_SIZE + TILE_SIZE // 2,
-                                door_y * TILE_SIZE + TILE_SIZE // 2,
-                                10,  # ширина двери в пикселях
-                                40   # высота двери в пикселях
-                            ))
-                
-                # Вертикальное соединение (комнаты друг над другом)
-                if (room1.y + room1.h == room2.y or room2.y + room2.h == room1.y):
-                    # Проверяем, что они перекрываются по горизонтали
-                    if (room1.x < room2.x + room2.w and room2.x < room1.x + room1.w):
-                        # Определяем, какая комната сверху
-                        if room1.y + room1.h == room2.y:  # room1 над room2
-                            top_room = room1
-                            bottom_room = room2
-                        else:  # room2 над room1
-                            top_room = room2
-                            bottom_room = room1
-                        
-                        # Находим общую область по горизонтали
-                        left = max(top_room.x, bottom_room.x)
-                        right = min(top_room.x + top_room.w, bottom_room.x + bottom_room.w)
-                        
-                        if right - left > 4:  # Если общая стена достаточно длинная
-                            door_x = random.randint(left + 1, right - 2)
-                            door_y = top_room.y + top_room.h
-                            
-                            door_data = (door_x, door_y, 3, 1)
-                            self.door_positions.append(door_data)
-                            door_positions.append((
-                                door_x * TILE_SIZE + TILE_SIZE // 2,
-                                door_y * TILE_SIZE + TILE_SIZE // 2,
-                                40,  # ширина двери в пикселях
-                                10   # высота двери в пикселях
-                            ))
-        
-        return door_positions
+        """Двери для лабиринта — пока не используются."""
+        self.door_positions = []
+        return []
     
     def check_collision(self, rect, dx, dy):
         """Проверяет столкновение при движении"""
@@ -430,12 +402,7 @@ class DungeonGenerator:
     def get_map_size_pixels(self):
         """Возвращает размер карты в пикселях"""
         return (self.width * self.tile_size, self.height * self.tile_size)
-    
+
     def get_player_start_position(self):
-        """Возвращает стартовую позицию игрока в первой комнате"""
-        if self.rooms:
-            room = self.rooms[0]
-            x = (room.x + room.w // 2) * self.tile_size
-            y = (room.y + room.h // 2) * self.tile_size
-            return (x, y)
-        return (self.width * self.tile_size // 2, self.height * self.tile_size // 2)
+        x, y = 1, 1
+        return (x * TILE_SIZE + TILE_SIZE // 2, y * TILE_SIZE + TILE_SIZE // 2)
