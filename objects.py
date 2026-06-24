@@ -4,24 +4,30 @@ import random
 
 class Torch(pygame.sprite.Sprite):
     """Факел на стене с анимированным пламенем"""
-    def __init__(self, x, y, direction='left'):
+    def __init__(self, x, y, direction='left', wall_side=None):
         super().__init__()
         self.x = x
         self.y = y
-        self.direction = direction  # 'left' or 'right'
+        self.direction = direction
+        self.wall_side = wall_side or ('left' if direction == 'right' else 'right')
         self.frame = 0
         self.animation_speed = 0.1
-        
-        # Размеры факела
+
         self.width = 40
         self.height = 60
-        
-        # Создаём поверхность для факела
+
         self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        self.rect = self.image.get_rect(center=(x, y))
-        
-        # Параметры мерцания
+        self.rect = self.image.get_rect()
+        anchor = {
+            'left': 'midright',
+            'right': 'midleft',
+            'top': 'midbottom',
+            'bottom': 'midtop',
+        }.get(self.wall_side, 'center')
+        setattr(self.rect, anchor, (x, y))
+
         self.flame_offset = 0
+        self.draw_torch()
         
     def update(self, dt):
         """Обновление анимации"""
@@ -122,6 +128,7 @@ class Door(pygame.sprite.Sprite):
         
         # Состояние двери (для коллизий)
         self.is_blocked = not is_open
+        self.draw_door()
         
     def toggle(self):
         """Открыть или закрыть дверь"""

@@ -4,7 +4,10 @@ import pygame
 from settings import *
 from player import _load_sprite
 
-KNIGHT_IMAGE = os.path.join("assets", "images", "player", "knight.jpg")
+_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "images", "player")
+KNIGHT_IMAGE = os.path.join(_ASSETS, "knight.jpg")
+MAG_IMAGE = os.path.join(_ASSETS, "mag.jpg")
+ROGUE_IMAGE = os.path.join(_ASSETS, "razboynik.jpg")
 
 CHARACTERS = [
     {
@@ -22,7 +25,7 @@ CHARACTERS = [
         "hp": 60,
         "attack": 30,
         "speed": 4,
-        "image": "assets/images/player/mag.jpg",
+        "image": MAG_IMAGE,
         "mana": 100,
         "color": (80, 80, 220),
     },
@@ -32,7 +35,7 @@ CHARACTERS = [
         "hp": 80,
         "attack": 20,
         "speed": 6,
-        "image": "assets/images/player/razboynik.jpg",
+        "image": ROGUE_IMAGE,
         "color": (60, 180, 60),
     },
 ]

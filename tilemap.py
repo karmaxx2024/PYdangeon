@@ -1,3 +1,4 @@
+import math
 import os
 import pygame
 import random
@@ -9,33 +10,64 @@ TILE_DOOR = 2
 TILE_STAIRS = 3
 TILE_TRAP = 4
 
-WALL_IMAGE = os.path.join("assets", "images", "decorations", "wall.jpg")
-FLOOR_IMAGE = os.path.join("assets", "images", "decorations", "floor.jpg")
-FLOOR_MOSS_IMAGE = os.path.join("assets", "images", "decorations", "floor2.jpg")
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "images")
+
+WALL_IMAGE = os.path.join(ASSETS_DIR, "decorations", "wall.png")
+FLOOR_IMAGE = os.path.join(ASSETS_DIR, "decorations", "floor.jpg")
+FLOOR_MOSS_IMAGE = os.path.join(ASSETS_DIR, "decorations", "floor2.jpg")
 FLOOR_IMAGE_CANDIDATES = [
     FLOOR_IMAGE,
-    FLOOR_MOSS_IMAGE,
-    os.path.join("assets", "images", "decorations", "floor2.jpg"),
+    os.path.join(ASSETS_DIR, "decoratons", "floor.jpg"),
 ]
+WALL_IMAGE_CANDIDATES = [
+    WALL_IMAGE,
+    os.path.join(ASSETS_DIR, "decorations", "wall.jpg"),
+    os.path.join(ASSETS_DIR, "decoratons", "wall.png"),
+    os.path.join(ASSETS_DIR, "decoratons", "wall.jpg"),
+]
+FLOOR_MOSS_CANDIDATES = [
+    FLOOR_MOSS_IMAGE,
+    os.path.join(ASSETS_DIR, "decoratons", "floor2.jpg"),
+]
+
+
+def _resolve_asset_path(path, candidates):
+    if path and os.path.exists(path):
+        return path
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return path or (candidates[0] if candidates else None)
 
 
 def _resolve_floor_path(path=None):
     """Определяет путь к текстуре пола"""
     if path and os.path.exists(path):
         return path
+    if path and "floor2" in path:
+        return _resolve_asset_path(path, FLOOR_MOSS_CANDIDATES)
     for candidate in FLOOR_IMAGE_CANDIDATES:
         if os.path.exists(candidate):
             return candidate
+    decoratons_floor = os.path.join(ASSETS_DIR, "decoratons", "floor.jpg")
+    if os.path.exists(decoratons_floor):
+        return decoratons_floor
     return path or FLOOR_IMAGE_CANDIDATES[0]
 
 
 def load_wall_tile(tile_size=TILE_SIZE):
     """Загружает текстуру стены"""
-    if not os.path.exists(WALL_IMAGE):
-        print("Нет стены:", WALL_IMAGE)
+    path = _resolve_asset_path(WALL_IMAGE, WALL_IMAGE_CANDIDATES)
+    if not path or not os.path.exists(path):
+        print("Нет стены. Искали:", WALL_IMAGE_CANDIDATES)
         return None
 
-    wall_img = pygame.image.load(WALL_IMAGE).convert()
+    wall_img = pygame.image.load(path)
+    if path.lower().endswith(".png"):
+        wall_img = wall_img.convert_alpha()
+    else:
+        wall_img = wall_img.convert()
+    print(f"✓ Стена: {path} → тайл {tile_size}x{tile_size}")
     return pygame.transform.scale(wall_img, (tile_size, tile_size))
 
 
@@ -113,25 +145,28 @@ def draw_floor_with_camera(screen, base_tile, moss_tile, layout, camera_x, camer
                 screen.blit(base_tile, (x, y))
         return
     
-    # Рассчитываем, какие тайлы видны
-    start_x = max(0, camera_x // tw)
-    start_y = max(0, camera_y // th)
-    end_x = min(len(layout[0]) if layout and len(layout) > 0 else 0, (camera_x + sw) // tw + 1)
-    end_y = min(len(layout) if layout else 0, (camera_y + sh) // th + 1)
-    
-    for row in range(start_y, end_y):
-        for col in range(start_x, end_x):
+    layout_cols = len(layout[0]) if layout else 0
+    layout_rows = len(layout) if layout else 0
+
+    start_col = int(math.floor(camera_x / tw))
+    end_col = int(math.ceil((camera_x + sw) / tw))
+    start_row = int(math.floor(camera_y / th))
+    end_row = int(math.ceil((camera_y + sh) / th))
+
+    for row in range(start_row, end_row):
+        for col in range(start_col, end_col):
             screen_x = col * tw - camera_x
             screen_y = row * th - camera_y
-            
-            # Проверяем, что координаты валидны
-            if row < 0 or row >= len(layout) or col < 0 or col >= len(layout[row]):
-                use_moss = False
-            else:
-                use_moss = moss_tile is not None and layout[row][col]
-            
-            tile = moss_tile if use_moss else base_tile
-            screen.blit(tile, (screen_x, screen_y))
+            if screen_x + tw <= 0 or screen_x >= sw or screen_y + th <= 0 or screen_y >= sh:
+                continue
+
+            use_moss = (
+                moss_tile is not None
+                and 0 <= row < layout_rows
+                and 0 <= col < layout_cols
+                and layout[row][col]
+            )
+            screen.blit(moss_tile if use_moss else base_tile, (screen_x, screen_y))
 
 
 def draw_walls(screen, wall_tile, map_width, map_height, camera_x=0, camera_y=0, show_collision=False, collision_rects=None):
